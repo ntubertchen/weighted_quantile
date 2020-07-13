@@ -164,7 +164,7 @@ def _weighted_ureduce(a, func, **kwargs):
     axis = kwargs.get('axis', None)
     # Sanity checks
     if a.shape != w.shape:
-        if not axis:
+        if axis is None:
             if w.ndim != 1 or a.size != w.shape[0]:
                 raise ValueError(
                     "Weights must have the same shape as a or the "
@@ -198,6 +198,7 @@ def _weighted_ureduce(a, func, **kwargs):
 
         if len(axis) == 1:
             kwargs['axis'] = axis[0]
+            kwargs['w'] = w
         else:
             keep = set(range(nd)) - set(axis)
             nkeep = len(keep)
@@ -310,6 +311,8 @@ def _weights_is_valid(w):
         return False
     if np.isscalar(w):
         return False
+    if np.isnan(w).any():
+        return False
     return True
 
 def _lerp(a, b, t, out=None):
@@ -410,8 +413,9 @@ def _weighted_quantile_ureduce_func(
                                 "interpolation can only be 'linear', 'lower' "
                                 "'higher', 'midpoint', or 'nearest'")
                         break
-                i += 1
-            assert i < Nx
+                i += 1  
+            if i == Nx:
+                target_indice.append(0)
         target_indices.append(target_indice)
     target_indices = asarray(target_indices)
     target_indices = np.moveaxis(target_indices, -1, 0)
@@ -444,11 +448,14 @@ def _weighted_quantile_ureduce_func(
         Sk_differ = np.take_along_axis(
             normalized_w, target_indices_above, axis=0) \
             - np.take_along_axis(normalized_w, target_indices_below, axis=0)
+
         # print (q.size).reshape(target_indices_below.shape)
-        weights_above = np.divide(
-            (np.expand_dims(q[sorted_indice_q], axis=-1) 
-            - np.take_along_axis(normalized_w, target_indices_below, axis=0) ) 
-            , Sk_differ)
+        q_minus_sk = np.expand_dims(q[sorted_indice_q], axis=-1) \
+            - np.take_along_axis(normalized_w, target_indices_below, axis=0)
+        q_minus_sk_nonzero = q_minus_sk > 0
+        weights_above = np.divide(q_minus_sk , Sk_differ, 
+            where=q_minus_sk_nonzero)
+        weights_above[~ q_minus_sk_nonzero] = 0
         if target_indices.ndim != sorted_a.ndim:
             target_indices_below = target_indices_below.reshape((-1,)
                 + sorted_a.shape[1:])
