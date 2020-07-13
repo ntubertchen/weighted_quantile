@@ -148,7 +148,7 @@ def c_quantile(a, q, w=None, axis=None, out=None,
     w = np.asanyarray(w)
     if not _quantile_is_valid(q):
         raise ValueError("Quantiles must be in the range [0, 1]")
-    if w is not None and not _weights_is_valid(w):
+    if w is not None and not _weights_is_valid(w, axis):
         raise ValueError(
             "Weights must be nonnegative and total sum must be larger than 0")
     if w is not None:
@@ -187,7 +187,7 @@ def _weighted_ureduce(a, func, **kwargs):
                 a.shape[:axis_tuple[0]] + a.shape[axis_tuple[0]+1:] + w.shape)
             w = np.moveaxis(w, -1, axis_tuple[0])
             assert a.shape == w.shape
-
+    a[w == 0] = np.nan
     if axis is not None:
         keepdim = list(a.shape)
         nd = a.ndim
@@ -276,6 +276,7 @@ def _quantile_unchecked(
     r, k = _ureduce(a, func=_quantile_ureduce_func, q=q, w=w, axis=axis, 
                     out=out, overwrite_input=overwrite_input,
                     interpolation=interpolation)
+
     if keepdims:
         return r.reshape(q.shape + k)
     else:
@@ -291,6 +292,10 @@ def _weighted_quantile_unchecked(
     if keepdims:
         return r.reshape(q.shape + k)
     else:
+        if q.size == 1:
+            r = np.squeeze(r, axis=0)
+        elif r.size == 1:
+            r = r[0]
         return r
 
 def _quantile_is_valid(q):
@@ -305,10 +310,17 @@ def _quantile_is_valid(q):
             return False
     return True
 
-def _weights_is_valid(w):
+def _weights_is_valid(w, axis):
     # avoid expensive reductions, relevant for arrays with < O(1000) elements
-    if np.count_nonzero(w < 0) or np.sum(w) == 0:
+    w = np.asanyarray(w)
+    if np.count_nonzero(w < 0):
         return False
+    if w.ndim > 1:
+        if (np.sum(w, axis=axis) == 0).any():
+            return False
+    else:
+        if np.sum(w) == 0:
+            return False
     if np.isscalar(w):
         return False
     if np.isnan(w).any():
